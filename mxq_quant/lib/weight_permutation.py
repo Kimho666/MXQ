@@ -1,0 +1,93 @@
+import torch
+
+
+@torch.jit.script
+def find_greedy_nearest_indices(weight: torch.Tensor, use_abs: bool = False):
+    print("use_abs", use_abs)
+    ordered_unit_weight_t = weight.detach().t().clone()
+
+    ordered_unit_weight_t /= ordered_unit_weight_t.norm(p=2, dim=-1, keepdim=True)
+    distance_matrix = ordered_unit_weight_t @ ordered_unit_weight_t.T
+
+    if use_abs:
+        distance_matrix = abs(distance_matrix)
+    permutation = torch.arange(len(ordered_unit_weight_t), device=weight.device)
+    for dim_i in range(len(ordered_unit_weight_t) - 2):
+        nearest_dim_i = (dim_i + 1) + distance_matrix[dim_i, dim_i + 1 :].argmax()
+        next_dim_i = torch.full_like(nearest_dim_i, dim_i + 1)
+        index_pair = torch.stack([next_dim_i, nearest_dim_i])
+        swapped_index_pair = torch.stack([nearest_dim_i, next_dim_i])
+        ordered_unit_weight_t[index_pair] = ordered_unit_weight_t[swapped_index_pair]
+        distance_matrix[index_pair] = distance_matrix[swapped_index_pair]
+        distance_matrix[:, index_pair] = distance_matrix[:, swapped_index_pair]
+        permutation[index_pair] = permutation[swapped_index_pair]
+    return permutation
+
+
+def get_permutation_order(H: torch.Tensor, W: torch.Tensor, permutation_order: str = "identity", use_abs: bool = False):
+    """
+    Permutation order for layer weights.
+    :param H: Hessian of Weights
+    :param W: Layer weights
+    :param permutation_order: which permutation order to use default: identity, act_order,nearest
+    :return: permutation order 1d int tensor
+    """
+
+    if permutation_order == "spearman":
+        w_rank = W.argsort(dim=0).argsort(dim=0).float()
+        w_rank = w_rank - w_rank.mean(dim=0, keepdim=True)
+        perm = find_greedy_nearest_indices(w_rank, use_abs)
+    elif permutation_order == "act_order":
+        perm = torch.argsort(torch.diag(H), descending=True)
+    elif permutation_order == "sparse_act_order":
+        dead = torch.diag(H) == 0
+        H[dead, dead] = 1
+        W[:, dead] = 0
+        percdamp = 1e0
+
+        damp = percdamp * torch.mean(torch.diag(H))
+        diag = torch.arange(H.shape[0], device=H.device)
+        H[diag, diag] += damp
+        H = torch.linalg.cholesky(H)
+        H = torch.cholesky_inverse(H)
+        H = torch.linalg.cholesky(H, upper=True)
+
+        #tmp = (W ** 2).sum(dim=0) / (torch.diag(H).reshape((1, -1))) ** 2
+        tmp = ((W ** 2) / (torch.diag(H).reshape((1, -1))) ** 2).sum(dim=0)
+
+        perm = torch.argsort(tmp, descending=True).squeeze(0)
+        print(f"before 2:4 permutation:perm={perm}")
+        #print(perm.shape)
+        perm_idx = torch.zeros_like(perm)
+        perm_idx = perm.clone()
+        for i in range(int(perm.shape[0]/2)):
+            if (i%4 == 2) or (i%4 == 3):
+                perm_idx[i] = perm[i+int(perm.shape[0]/2)-2]
+                perm_idx[i+int(perm.shape[0]/2)-2] = perm[i]
+            else:
+                perm_idx[i] = perm[i]
+        perm = perm_idx
+
+        print(f"after 2:4 permutation:perm={perm}")
+    elif permutation_order == "act_row_order":
+        dead = torch.diag(H) == 0
+        H[dead, dead] = 1
+        W[:, dead] = 0
+        percdamp = 1e0
+
+        damp = percdamp * torch.mean(torch.diag(H))
+        diag = torch.arange(H.shape[0], device=H.device)
+        H[diag, diag] += damp
+        H = torch.linalg.cholesky(H)
+        H = torch.cholesky_inverse(H)
+        H = torch.linalg.cholesky(H, upper=True)
+        tmp = ((W ** 2) / (torch.diag(H).reshape((1, -1))) ** 2).sum(dim=1)
+        perm = torch.argsort(tmp, descending=True).squeeze(0)
+
+    elif permutation_order == "identity":
+        perm = torch.arange(H.shape[0], device=H.device)
+    elif isinstance(permutation_order, torch.Tensor):
+        return permutation_order  # user-defined
+    else:
+        raise ValueError(f"Unknown permutation order name: {permutation_order}")
+    return perm
