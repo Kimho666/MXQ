@@ -1,4 +1,0 @@
-# ninja log v5
-0	25584	1698480740459277768	/user/jhli/quantization/temp/MXQ/mxq_quant/cuda_kernel/build/temp.linux-x86_64-cpython-38/csrc/pybind.o	8bcc6e80a1d54a7f
-2	53438	1698480768331376198	/user/jhli/quantization/temp/MXQ/mxq_quant/cuda_kernel/build/temp.linux-x86_64-cpython-38/csrc/quantization/gemv_mxq_cuda.o	df417fb43dd77e66
-1	54895	1698480769787381273	/user/jhli/quantization/temp/MXQ/mxq_quant/cuda_kernel/build/temp.linux-x86_64-cpython-38/csrc/quantization/gemv_cuda.o	45ea3e09b8d7c968

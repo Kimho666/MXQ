@@ -11,6 +11,7 @@
 #define PACK_FACTOR 8
 #define PACK_FACTOR_2b 16
 #define WARP_SIZE 32
+#define DEBUG_THY 1023
 
 
 // Reduce sum within the warp using the tree reduction algorithm.
@@ -85,8 +86,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
     packed_zeros_2nd = shared_packed_2nd_zeros[threadIdx.x];
 
     __shared__ double4 shared_packed_inputs[256];
-    shared_packed_inputs[threadIdx.x * 4] = inputs[threadIdx.x * 4];
-    shared_packed_inputs[128 + threadIdx.x * 4] = inputs[128 + threadIdx.x * 4];
+    shared_packed_inputs[threadIdx.x * 4 + threadIdx.y] = inputs[threadIdx.x * 4 + threadIdx.y];
+    shared_packed_inputs[128 + threadIdx.x * 4 + threadIdx.y] = inputs[128 + threadIdx.x * 4 + threadIdx.y];
     __syncthreads();
 
     for (int packed_group_idx = 0; packed_group_idx < 2; packed_group_idx++)
@@ -102,8 +103,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
         uint32_t packed_weights[4];
         uint32_t packed_weights_last;
         // use float4 to load weights, each thread first load 3*16*2b and 1*8*4b, then load 1*8*4b, totally 64 elements
-        *((float4 *)(packed_weights)) = *((float4 *)(weight + oc_idx * weight_w + packed_group_idx * (WARP_SIZE * 4) + threadIdx.x * 4));
-        packed_weights_last = weight_last[oc_idx * weight_last_w + packed_group_idx * (WARP_SIZE * 4) + threadIdx.x];
+        *((float4 *)(packed_weights)) = *((float4 *)(weight + oc_idx * weight_w + packed_group_idx * weight_w / 2 + threadIdx.x * 4));
+        packed_weights_last = weight_last[oc_idx * weight_last_w + packed_group_idx * weight_last_w / 2 + threadIdx.x];
 
         // int inputs_ptr_delta = packed_group_idx * 0 + threadIdx.x * 1; // 0, 2048/2, ...
         // const double4 *inputs_ptr = shared_packed_input + inputs_ptr_delta;
@@ -125,8 +126,10 @@ __global__ void gemv_mxq_kernel_g16_v0(
             current_2nd_zeros = (float)((loop_packed_zeros_2nd >> (ii * 2)) & 0x3);
             current_1st_scales = (float)((loop_packed_scales_1st >> (ii * 2)) & 0x3);
 
-            float scaling_factor = __half2float(scales_2nd[oc_idx / second_order_group_size * zeros_and_scales_w_1st + packed_group_idx]) * (current_1st_scales - current_2nd_zeros);
-
+            half scaling_factor_2nd = scales_2nd[oc_idx / second_order_group_size * 192 + packed_group_idx * 192/2 + threadIdx.x * 3 + ii];
+            float scaling_factor = __half2float(scaling_factor_2nd) * (current_1st_scales - current_2nd_zeros);
+            // if(blockIdx.x == 0 && blockIdx.y == DEBUG_THY && threadIdx.x == 0 && threadIdx.y == 0)// && packed_group_idx == 0)
+            // printf("[Loop %0d]: scale=%f, 1st_scale=%f, 2nd_zero=%f, 2nd_scale=%0f\n", ii, scaling_factor, current_1st_scales, current_2nd_zeros, scaling_factor_2nd);
             // __shared__ double4 shared_packed_inputs[32];
             // shared_packed_inputs[threadIdx.x] = inputs[packed_group_idx * 128  + threadIdx.x * 4];
 
@@ -141,9 +144,11 @@ __global__ void gemv_mxq_kernel_g16_v0(
             {
                 float current_single_weight_fp = (float)(current_packed_weight & 0x3);
                 float dequantized_weight = scaling_factor * (current_single_weight_fp - current_1st_zeros);
-                // if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0 && ic_0 == 0 && ic_1 == 0 && packed_group_idx == 0)
-                // printf("%f %f %f %f %X %X\n", dequantized_weight, current_single_weight_fp, scaling_factor, current_zeros, current_packed_weight, packed_zeros);
+                // if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0 && packed_group_idx == 0)
+                // printf("[%0d,%0d]: dq_weight=%f, input=%f, current_weight=%f, scale=%f, zero=%f, %X\n", ii, jj, dequantized_weight, packed_inputs[jj], current_single_weight_fp, scaling_factor, current_1st_zeros, current_packed_weight);
                 psum += dequantized_weight * __half2float(packed_inputs[jj]);
+                // if(blockIdx.x == 0 && blockIdx.y == DEBUG_THY && threadIdx.x == 0 && threadIdx.y == 0)// && packed_group_idx == 0)
+                // printf("[%0d,%0d]: psum=%f, dq_weight=%f, input=%f, current_weight=%f, scale=%f, zero=%f, %X\n", ii, jj, psum, dequantized_weight, packed_inputs[jj], current_single_weight_fp, scaling_factor, current_1st_zeros, current_packed_weight);
                 current_packed_weight = current_packed_weight >> 2;
             }
         }
@@ -167,6 +172,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
                 // if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0 && ic_0 == 0 && ic_1 == 0 && packed_group_idx == 0)
                 // printf("%f %f %f %f %X %X\n", dequantized_weight, current_single_weight_fp, scaling_factor, current_zeros, current_packed_weight, packed_zeros);
                 psum += dequantized_weight * __half2float(packed_inputs[jj]);
+                // if(blockIdx.x == 0 && blockIdx.y == DEBUG_THY && threadIdx.x == 0 && threadIdx.y == 0)// && packed_group_idx == 0)
+                // printf("[3,%0d]: psum=%f, dq_weight=%f, input=%f, current_weight=%f, scale=%f, zero=%f, %X\n", jj, psum, dequantized_weight, packed_inputs[jj], current_single_weight_fp, scaling_factor_4b, zeros_4b, current_packed_weight);
                 current_packed_weight = current_packed_weight >> 4;
             }
 
@@ -178,6 +185,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
                 // if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 && threadIdx.y == 0 && ic_0 == 0 && ic_1 == 0 && packed_group_idx == 0)
                 // printf("%f %f %f %f %X %X\n", dequantized_weight, current_single_weight_fp, scaling_factor, current_zeros, current_packed_weight, packed_zeros);
                 psum += dequantized_weight * __half2float(packed_inputs[jj + 8]);
+                // if(blockIdx.x == 0 && blockIdx.y == DEBUG_THY && threadIdx.x == 0 && threadIdx.y == 0)// && packed_group_idx == 0)
+                // printf("[3,%0d]: psum=%f, dq_weight=%f, input=%f, current_weight=%f, scale=%f, zero=%f, %X\n", (jj+8), psum, dequantized_weight, packed_inputs[jj+8], current_single_weight_fp, scaling_factor_4b, zeros_4b, current_packed_weight);
                 current_packed_weight_last = current_packed_weight_last >> 4;
             }
         }
