@@ -21,7 +21,7 @@ B = torch.randn((K, N), device=DEV, dtype=DTYPE)
 A = torch.randn((M, K), device=DEV, dtype=DTYPE)
 C = torch.zeros((M, N), device=DEV, dtype=DTYPE)
 
-COUNT = 10000
+COUNT = 100000
 import time
 torch.matmul(A, B, out=C) 
 torch.cuda.synchronize()

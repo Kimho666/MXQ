@@ -84,11 +84,14 @@ __global__ void gemv_mxq_kernel_g16_v0(
 
     uint32_t packed_zeros_2nd;
     packed_zeros_2nd = shared_packed_2nd_zeros[threadIdx.x];
-
-    __shared__ double4 shared_packed_inputs[256];
-    shared_packed_inputs[threadIdx.x * 4 + threadIdx.y] = inputs[threadIdx.x * 4 + threadIdx.y];
-    shared_packed_inputs[128 + threadIdx.x * 4 + threadIdx.y] = inputs[128 + threadIdx.x * 4 + threadIdx.y];
     __syncthreads();
+
+    // __shared__ double4 shared_packed_inputs[256];
+    // shared_packed_inputs[threadIdx.y * WARP_SIZE + threadIdx.x] = inputs[threadIdx.x * 4 + threadIdx.y];
+    // shared_packed_inputs[128 + threadIdx.y * WARP_SIZE + threadIdx.x] = inputs[128 + threadIdx.x * 4 + threadIdx.y];
+    // shared_packed_inputs[threadIdx.x * 4 + threadIdx.y] = inputs[threadIdx.x * 4 + threadIdx.y];
+    // shared_packed_inputs[128 + threadIdx.x * 4 + threadIdx.y] = inputs[128 + threadIdx.x * 4 + threadIdx.y];
+    // __syncthreads();
 
     for (int packed_group_idx = 0; packed_group_idx < 2; packed_group_idx++)
     {
@@ -112,6 +115,9 @@ __global__ void gemv_mxq_kernel_g16_v0(
         // __shared__ double4 shared_packed_inputs[128];
         // shared_packed_inputs[threadIdx.x * 4] = inputs[packed_group_idx * 128  + threadIdx.x * 4];
         // __syncthreads();
+        __shared__ double4 shared_packed_inputs[128];
+        shared_packed_inputs[threadIdx.y * WARP_SIZE + threadIdx.x] = inputs[threadIdx.x * 4 + threadIdx.y];
+        __syncthreads();
 
 #pragma unroll
         for (int ii = 0; ii < 3; ii++)
@@ -137,7 +143,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
 
             uint32_t current_packed_weight = packed_weights[ii];
             half packed_inputs[16];
-            *((double4 *)packed_inputs) = *(shared_packed_inputs + ii);
+            // *((double4 *)packed_inputs) = *(shared_packed_inputs + threadIdx.x * 4 + ii);
+            *((double4 *)packed_inputs) = *(shared_packed_inputs + ii * WARP_SIZE + threadIdx.x);
 
 #pragma unroll
             for (int jj = 0; jj < 16; jj++)
@@ -162,7 +169,8 @@ __global__ void gemv_mxq_kernel_g16_v0(
 
             // __syncthreads();
             half packed_inputs[16];
-            *((double4 *)packed_inputs) = *(shared_packed_inputs + 3);
+            // *((double4 *)packed_inputs) = *(shared_packed_inputs + threadIdx.x * 4 + 3);
+            *((double4 *)packed_inputs) = *(shared_packed_inputs + 3 * WARP_SIZE + threadIdx.x);
 
 #pragma unroll
             for (int jj = 0; jj < 8; jj++)
