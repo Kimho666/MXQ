@@ -6,6 +6,7 @@ Harware-friendly Mixed-precision 2-4 Quantization Method with QAT Fintune
 ![image](https://github.com/Kimho666/MXQ/assets/137678908/94b527ab-31c7-41ac-a868-5235fa779ab4)
 
 使用说明：
+
 一、finetune步骤
 
 1. 进入LLM-QAT目录，直接运行 bash run_train.sh 2 32 32即可（2/4混合量化中4的部分已在代码中固定）
