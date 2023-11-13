@@ -406,7 +406,7 @@ def nas_quant(args, model, tokenizer, dev):
         for name in gpts:
             print(i, name)
             print('Pruning ...')
-            gpts[name].fasterquant(percdamp=0.01, blocksize=32)
+            gpts[name].fasterquant(percdamp=0.01, blocksize=16)
             if args.save:
                full_path = args.save + str(i) + "/"
                os.makedirs(full_path, exist_ok=True)
